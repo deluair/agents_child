@@ -1,0 +1,29 @@
+{
+  "name": "MyAdvancedAgent",
+  "version": "1.0.0",
+  "memory_path": "./agent_memory",
+  "log_level": "INFO",
+  "memory": {
+    "short_term_capacity": 100,
+    "episodic_capacity": 10000,
+    "semantic_capacity": 50000,
+    "consolidation_threshold": 0.8,
+    "forgetting_rate": 0.001,
+    "embedding_dim": 384
+  },
+  "learning": {
+    "learning_rate": 0.001,
+    "batch_size": 32,
+    "update_frequency": 10,
+    "exploration_rate": 0.1,
+    "adaptation_threshold": 0.7
+  },
+  "knowledge": {
+    "max_entities": 100000,
+    "max_relations": 500000,
+    "similarity_threshold": 0.8,
+    "reasoning_depth": 3
+  },
+  "embedding_model": "all-MiniLM-L6-v2",
+  "language_model": "distilbert-base-uncased"
+}
