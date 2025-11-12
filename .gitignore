@@ -135,8 +135,16 @@ demo_memory/
 knowledge_demo/
 learning_demo/
 emotional_demo/
+data/
 *.pkl
+*.pickle
 *.db
+*.sqlite
+*.json.tmp
+memory_state.json
+knowledge_graph.json
+learning_data.json
+logs/
 
 # IDE
 .vscode/
@@ -144,13 +152,34 @@ emotional_demo/
 *.swp
 *.swo
 *~
+*.sublime-project
+*.sublime-workspace
 
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # Temporary files
 *.tmp
 *.temp
+*.bak
 temp/
 tmp/
+
+# Security
+*.pem
+*.key
+credentials.json
+secrets.json
+
+# Environment
+.env.local
+.env.*.local
+.envrc
+
+# Docker
+docker-compose.override.yml
+
+# Monitoring
+monitoring/data/

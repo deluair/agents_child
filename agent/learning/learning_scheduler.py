@@ -3,7 +3,7 @@ Learning scheduler for managing when and how learning occurs
 """
 
 from typing import Dict, Any, List, Optional, Callable
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 import threading
 import time
@@ -22,8 +22,8 @@ class LearningTrigger(Enum):
 
 class ScheduledTask:
     """Represents a scheduled learning task"""
-    
-    def __init__(self, task_id: str, trigger: LearningTrigger, 
+
+    def __init__(self, task_id: str, trigger: LearningTrigger,
                  trigger_params: Dict[str, Any], action: Callable,
                  priority: int = 5):
         self.task_id = task_id
@@ -34,6 +34,7 @@ class ScheduledTask:
         self.last_executed = None
         self.execution_count = 0
         self.enabled = True
+        self._lock = threading.Lock()  # Thread safety for task state
         
     def should_execute(self, context: Dict[str, Any]) -> bool:
         """Check if task should be executed based on trigger and context"""
@@ -54,11 +55,11 @@ class ScheduledTask:
                 
         elif self.trigger == LearningTrigger.TIME_INTERVAL:
             interval_hours = self.trigger_params.get("hours", 1)
-            
+
             if self.last_executed is None:
                 return True
             else:
-                time_since_last = datetime.now() - self.last_executed
+                time_since_last = datetime.now(timezone.utc) - self.last_executed
                 return time_since_last >= timedelta(hours=interval_hours)
                 
         elif self.trigger == LearningTrigger.PERFORMANCE_THRESHOLD:
@@ -87,78 +88,90 @@ class ScheduledTask:
         return False
         
     def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute the scheduled task"""
-        
+        """Execute the scheduled task (thread-safe)"""
+
         try:
             logger.info(f"Executing learning task: {self.task_id}")
-            
+
             result = self.action(context)
-            
-            self.last_executed = datetime.now()
-            self.execution_count += 1
-            
-            # Update trigger params if needed
-            if self.trigger == LearningTrigger.INTERACTION_COUNT:
-                self.trigger_params["last_count"] = context.get("interaction_count", 0)
-                
+
+            # Update task state with thread safety
+            with self._lock:
+                self.last_executed = datetime.now(timezone.utc)
+                self.execution_count += 1
+
+                # Update trigger params if needed
+                if self.trigger == LearningTrigger.INTERACTION_COUNT:
+                    self.trigger_params["last_count"] = context.get("interaction_count", 0)
+
+                execution_time = self.last_executed.isoformat()
+
             return {
                 "task_id": self.task_id,
                 "success": True,
                 "result": result,
-                "execution_time": self.last_executed.isoformat()
+                "execution_time": execution_time
             }
-            
+
         except Exception as e:
             logger.error(f"Error executing task {self.task_id}: {e}")
             return {
                 "task_id": self.task_id,
                 "success": False,
                 "error": str(e),
-                "execution_time": datetime.now().isoformat()
+                "execution_time": datetime.now(timezone.utc).isoformat()
             }
 
 
 class LearningScheduler:
-    """Scheduler for managing learning tasks and triggers"""
-    
+    """Scheduler for managing learning tasks and triggers (thread-safe)"""
+
     def __init__(self):
         self.tasks: Dict[str, ScheduledTask] = {}
         self.execution_history: List[Dict[str, Any]] = []
         self.running = False
         self.scheduler_thread = None
         self.check_interval = 60  # Check every 60 seconds
+
+        # Thread safety locks
+        self._tasks_lock = threading.Lock()
+        self._history_lock = threading.Lock()
         
     def add_task(self, task: ScheduledTask) -> None:
-        """Add a scheduled learning task"""
-        
-        self.tasks[task.task_id] = task
+        """Add a scheduled learning task (thread-safe)"""
+
+        with self._tasks_lock:
+            self.tasks[task.task_id] = task
         logger.info(f"Added learning task: {task.task_id}")
-        
+
     def remove_task(self, task_id: str) -> bool:
-        """Remove a scheduled learning task"""
-        
-        if task_id in self.tasks:
-            del self.tasks[task_id]
-            logger.info(f"Removed learning task: {task_id}")
-            return True
+        """Remove a scheduled learning task (thread-safe)"""
+
+        with self._tasks_lock:
+            if task_id in self.tasks:
+                del self.tasks[task_id]
+                logger.info(f"Removed learning task: {task_id}")
+                return True
         return False
-        
+
     def enable_task(self, task_id: str) -> bool:
-        """Enable a scheduled task"""
-        
-        if task_id in self.tasks:
-            self.tasks[task_id].enabled = True
-            logger.info(f"Enabled learning task: {task_id}")
-            return True
+        """Enable a scheduled task (thread-safe)"""
+
+        with self._tasks_lock:
+            if task_id in self.tasks:
+                self.tasks[task_id].enabled = True
+                logger.info(f"Enabled learning task: {task_id}")
+                return True
         return False
-        
+
     def disable_task(self, task_id: str) -> bool:
-        """Disable a scheduled task"""
-        
-        if task_id in self.tasks:
-            self.tasks[task_id].enabled = False
-            logger.info(f"Disabled learning task: {task_id}")
-            return True
+        """Disable a scheduled task (thread-safe)"""
+
+        with self._tasks_lock:
+            if task_id in self.tasks:
+                self.tasks[task_id].enabled = False
+                logger.info(f"Disabled learning task: {task_id}")
+                return True
         return False
         
     def start(self, context_provider: Callable[[], Dict[str, Any]]) -> None:
@@ -188,122 +201,140 @@ class LearningScheduler:
         logger.info("Learning scheduler stopped")
         
     def _scheduler_loop(self, context_provider: Callable[[], Dict[str, Any]]) -> None:
-        """Main scheduler loop"""
-        
+        """Main scheduler loop (thread-safe)"""
+
         while self.running:
             try:
                 context = context_provider()
-                
-                # Check each task
+
+                # Check each task (with thread safety)
                 ready_tasks = []
-                for task in self.tasks.values():
-                    if task.should_execute(context):
-                        ready_tasks.append(task)
-                        
+                with self._tasks_lock:
+                    for task in self.tasks.values():
+                        if task.should_execute(context):
+                            ready_tasks.append(task)
+
                 # Sort by priority (higher priority first)
                 ready_tasks.sort(key=lambda t: t.priority, reverse=True)
-                
+
                 # Execute ready tasks
                 for task in ready_tasks:
                     result = task.execute(context)
-                    self.execution_history.append(result)
-                    
-                    # Keep only recent execution history
-                    if len(self.execution_history) > 1000:
-                        self.execution_history = self.execution_history[-1000:]
-                        
+
+                    # Add to history with thread safety
+                    with self._history_lock:
+                        self.execution_history.append(result)
+
+                        # Keep only recent execution history
+                        if len(self.execution_history) > 1000:
+                            self.execution_history = self.execution_history[-1000:]
+
                 time.sleep(self.check_interval)
-                
+
             except Exception as e:
                 logger.error(f"Error in scheduler loop: {e}")
                 time.sleep(self.check_interval)
                 
     def trigger_manual_task(self, task_id: str) -> Dict[str, Any]:
-        """Manually trigger a task execution"""
-        
-        if task_id not in self.tasks:
-            return {"success": False, "error": "Task not found"}
-            
+        """Manually trigger a task execution (thread-safe)"""
+
+        # Get task with thread safety
+        with self._tasks_lock:
+            if task_id not in self.tasks:
+                return {"success": False, "error": "Task not found"}
+            task = self.tasks[task_id]
+
         # Create temporary context with manual trigger
         context = {"manual_trigger": {task_id: True}}
-        
-        task = self.tasks[task_id]
+
         result = task.execute(context)
-        self.execution_history.append(result)
-        
+
+        # Add to history with thread safety
+        with self._history_lock:
+            self.execution_history.append(result)
+
         return result
         
     def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
-        """Get status of a specific task"""
-        
-        if task_id not in self.tasks:
-            return None
-            
-        task = self.tasks[task_id]
-        
-        return {
-            "task_id": task.task_id,
-            "trigger": task.trigger.value,
-            "trigger_params": task.trigger_params,
-            "priority": task.priority,
-            "enabled": task.enabled,
-            "last_executed": task.last_executed.isoformat() if task.last_executed else None,
-            "execution_count": task.execution_count
-        }
-        
+        """Get status of a specific task (thread-safe)"""
+
+        with self._tasks_lock:
+            if task_id not in self.tasks:
+                return None
+            task = self.tasks[task_id]
+
+        with task._lock:
+            return {
+                "task_id": task.task_id,
+                "trigger": task.trigger.value,
+                "trigger_params": task.trigger_params.copy(),
+                "priority": task.priority,
+                "enabled": task.enabled,
+                "last_executed": task.last_executed.isoformat() if task.last_executed else None,
+                "execution_count": task.execution_count
+            }
+
     def get_all_tasks_status(self) -> Dict[str, Dict[str, Any]]:
-        """Get status of all tasks"""
-        
+        """Get status of all tasks (thread-safe)"""
+
+        with self._tasks_lock:
+            task_ids = list(self.tasks.keys())
+
         return {
             task_id: self.get_task_status(task_id)
-            for task_id in self.tasks.keys()
+            for task_id in task_ids
         }
         
     def get_execution_statistics(self) -> Dict[str, Any]:
-        """Get execution statistics"""
-        
-        if not self.execution_history:
-            return {
-                "total_executions": 0,
-                "success_rate": 0.0,
-                "average_executions_per_day": 0.0
-            }
-            
-        total_executions = len(self.execution_history)
+        """Get execution statistics (thread-safe)"""
+
+        with self._history_lock:
+            if not self.execution_history:
+                return {
+                    "total_executions": 0,
+                    "success_rate": 0.0,
+                    "average_executions_per_day": 0.0
+                }
+
+            # Copy history for processing (to minimize lock time)
+            history_copy = list(self.execution_history)
+
+        # Process outside of lock
+        total_executions = len(history_copy)
         successful_executions = len([
-            e for e in self.execution_history 
+            e for e in history_copy
             if e.get("success", False)
         ])
-        
+
         success_rate = successful_executions / total_executions if total_executions > 0 else 0.0
-        
+
         # Calculate executions per day
         if total_executions > 1:
-            first_execution = datetime.fromisoformat(self.execution_history[0]["execution_time"])
-            days_since_first = (datetime.now() - first_execution).days
+            first_execution = datetime.fromisoformat(history_copy[0]["execution_time"])
+            days_since_first = (datetime.now(timezone.utc) - first_execution).days
             executions_per_day = total_executions / max(1, days_since_first)
         else:
             executions_per_day = 0.0
-            
+
         # Task-specific statistics
         task_stats = {}
-        for execution in self.execution_history:
+        for execution in history_copy:
             task_id = execution.get("task_id", "unknown")
             if task_id not in task_stats:
                 task_stats[task_id] = {"total": 0, "successful": 0}
-                
+
             task_stats[task_id]["total"] += 1
             if execution.get("success", False):
                 task_stats[task_id]["successful"] += 1
-                
+
         return {
             "total_executions": total_executions,
             "success_rate": success_rate,
             "average_executions_per_day": executions_per_day,
             "task_statistics": task_stats,
             "recent_executions": len([
-                e for e in self.execution_history
-                if datetime.fromisoformat(e["execution_time"]) > datetime.now() - timedelta(days=1)
+                e for e in history_copy
+                if datetime.fromisoformat(e["execution_time"]) > datetime.now(timezone.utc) - timedelta(days=1)
             ])
         }
         

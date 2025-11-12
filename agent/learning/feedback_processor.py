@@ -3,7 +3,7 @@ Feedback processing system for learning from user interactions
 """
 
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 from loguru import logger
 
@@ -30,7 +30,7 @@ class FeedbackProcessor:
         """Process raw feedback and extract structured information"""
         
         processed = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "raw_feedback": feedback,
             "sentiment": self._analyze_sentiment(feedback),
             "aspects": self._analyze_aspects(feedback),

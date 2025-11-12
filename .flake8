@@ -1,0 +1,27 @@
+[flake8]
+max-line-length = 120
+extend-ignore = E203, E266, E501, W503, E402
+exclude =
+    .git,
+    __pycache__,
+    .venv,
+    venv,
+    build,
+    dist,
+    *.egg-info,
+    .tox,
+    .pytest_cache,
+    .mypy_cache,
+    data,
+    docs
+
+# McCabe complexity
+max-complexity = 15
+
+# Per-file ignores
+per-file-ignores =
+    __init__.py:F401
+    test_*.py:F401,F811
+
+# Docstring conventions
+docstring-convention = google

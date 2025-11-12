@@ -6,7 +6,7 @@ import os
 import json
 import time
 from typing import Dict, Any, List, Optional, Union
-from datetime import datetime
+from datetime import datetime, timezone
 from loguru import logger
 
 from .config import AgentConfig, load_config
@@ -42,7 +42,7 @@ class AdvancedAgent:
         
         # Performance tracking
         self.interaction_count = 0
-        self.start_time = datetime.now()
+        self.start_time = datetime.now(timezone.utc)
         
     def _init_processors(self):
         """Initialize processors with graceful fallback if dependencies missing"""
@@ -284,7 +284,7 @@ class AdvancedAgent:
                     "type": "feedback",
                     "feedback": feedback,
                     "processed_feedback": processed_feedback,
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 },
                 "semantic",
                 importance=0.8
@@ -332,7 +332,7 @@ class AdvancedAgent:
     def get_statistics(self) -> Dict[str, Any]:
         """Get comprehensive statistics about the agent"""
         
-        uptime = datetime.now() - self.start_time
+        uptime = datetime.now(timezone.utc) - self.start_time
         
         return {
             "agent_info": {
@@ -426,7 +426,7 @@ class AdvancedAgent:
         
         # Reset counters
         self.interaction_count = 0
-        self.start_time = datetime.now()
+        self.start_time = datetime.now(timezone.utc)
         
         # Save reset state
         self._save_state()

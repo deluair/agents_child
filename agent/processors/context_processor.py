@@ -3,7 +3,7 @@ Context processing component for understanding and managing conversation context
 """
 
 from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import deque
 import re
 from loguru import logger
@@ -25,7 +25,7 @@ class ContextProcessor:
         # Add current input to history
         self.conversation_history.append({
             "text": current_input,
-            "timestamp": datetime.now(),
+            "timestamp": datetime.now(timezone.utc),
             "type": "user_input"
         })
         
@@ -142,15 +142,15 @@ class ContextProcessor:
         
     def _update_entity_mentions(self, entities: List[Dict[str, str]]) -> None:
         """Update entity mention tracking"""
-        
-        current_time = datetime.now()
-        
+
+        current_time = datetime.now(timezone.utc)
+
         for entity in entities:
             entity_text = entity["text"]
             if entity_text not in self.entity_mentions:
                 self.entity_mentions[entity_text] = []
             self.entity_mentions[entity_text].append(current_time)
-            
+
         # Clean old mentions (older than 1 hour)
         cutoff_time = current_time - timedelta(hours=1)
         for entity_text in self.entity_mentions:
@@ -277,7 +277,7 @@ class ContextProcessor:
         self.context_variables["active_entities"] = [e["text"] for e in entities]
         
         # Update conversation state
-        self.context_variables["last_interaction"] = datetime.now().isoformat()
+        self.context_variables["last_interaction"] = datetime.now(timezone.utc).isoformat()
         self.context_variables["interaction_count"] = len(self.conversation_history)
         
         # Detect user intent
@@ -309,12 +309,12 @@ class ContextProcessor:
         
     def _build_context_summary(self) -> Dict[str, Any]:
         """Build a summary of current context"""
-        
+
         # Get recent topics
         recent_topics = list(set(self.topic_history[-5:])) if self.topic_history else []
-        
+
         # Get active entities (mentioned in last 10 minutes)
-        current_time = datetime.now()
+        current_time = datetime.now(timezone.utc)
         cutoff_time = current_time - timedelta(minutes=10)
         active_entities = [
             entity for entity, mentions in self.entity_mentions.items()

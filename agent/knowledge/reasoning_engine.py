@@ -3,7 +3,7 @@ Reasoning engine for logical inference and knowledge deduction
 """
 
 from typing import Dict, Any, List, Optional, Set, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 import networkx as nx
 from loguru import logger
 
@@ -20,7 +20,7 @@ class ReasoningEngine:
         """Add a reasoning rule"""
         
         rule_data = {
-            "id": rule.get("id", f"rule_{datetime.now().timestamp()}"),
+            "id": rule.get("id", f"rule_{datetime.now(timezone.utc).timestamp()}"),
             "name": rule.get("name", ""),
             "premises": rule.get("premises", []),
             "conclusion": rule.get("conclusion", ""),

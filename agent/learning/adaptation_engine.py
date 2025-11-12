@@ -3,7 +3,7 @@ Adaptation engine for dynamic behavior adjustment
 """
 
 from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import numpy as np
 from loguru import logger
 
@@ -33,7 +33,7 @@ class AdaptationEngine:
         """Adapt agent behavior based on feedback and performance"""
         
         adaptation = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "trigger_feedback": feedback,
             "trigger_metrics": performance_metrics,
             "adjustments": {},
@@ -276,7 +276,7 @@ class AdaptationEngine:
         # Calculate adaptation frequency (adaptations per day)
         if total_adaptations > 1:
             first_adaptation = datetime.fromisoformat(self.adaptation_history[0]["timestamp"])
-            days_since_first = (datetime.now() - first_adaptation).days
+            days_since_first = (datetime.now(timezone.utc) - first_adaptation).days
             frequency = total_adaptations / max(1, days_since_first)
         else:
             frequency = 0.0
@@ -294,7 +294,7 @@ class AdaptationEngine:
             "current_settings": self.current_settings,
             "recent_adaptations": len([
                 a for a in self.adaptation_history
-                if datetime.fromisoformat(a["timestamp"]) > datetime.now() - timedelta(days=1)
+                if datetime.fromisoformat(a["timestamp"]) > datetime.now(timezone.utc) - timedelta(days=1)
             ])
         }
         

@@ -4,10 +4,10 @@ Knowledge graph for storing and querying structured knowledge
 
 import os
 import json
-import pickle
 from typing import Dict, Any, List, Optional, Set, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 import networkx as nx
+from networkx.readwrite import json_graph
 import numpy as np
 from loguru import logger
 
@@ -32,8 +32,8 @@ class KnowledgeGraph:
         self.attribute_index: Dict[str, Dict[str, Set[str]]] = {}
         
         # Statistics
-        self.creation_time = datetime.now()
-        self.last_updated = datetime.now()
+        self.creation_time = datetime.now(timezone.utc)
+        self.last_updated = datetime.now(timezone.utc)
         
         # Load existing knowledge graph
         self._load_knowledge_graph()
@@ -45,46 +45,63 @@ class KnowledgeGraph:
         os.makedirs(self.memory_path, exist_ok=True)
         
     def _load_knowledge_graph(self):
-        """Load existing knowledge graph from disk"""
-        graph_file = os.path.join(self.memory_path, "knowledge_graph.pkl")
+        """Load existing knowledge graph from disk (JSON format for security)"""
+        graph_file = os.path.join(self.memory_path, "knowledge_graph.json")
         entities_file = os.path.join(self.memory_path, "entities.json")
         indexes_file = os.path.join(self.memory_path, "kg_indexes.json")
-        
+
+        # Legacy pickle file (migrate to JSON if exists)
+        legacy_graph_file = os.path.join(self.memory_path, "knowledge_graph.pkl")
+
         if os.path.exists(graph_file):
             try:
-                with open(graph_file, 'rb') as f:
-                    self.graph = pickle.load(f)
-                    
-                with open(entities_file, 'r') as f:
+                with open(graph_file, 'r', encoding='utf-8') as f:
+                    graph_data = json.load(f)
+                    self.graph = json_graph.node_link_graph(graph_data)
+
+                with open(entities_file, 'r', encoding='utf-8') as f:
                     self.entities = json.load(f)
-                    
-                with open(indexes_file, 'r') as f:
+
+                with open(indexes_file, 'r', encoding='utf-8') as f:
                     indexes_data = json.load(f)
                     self.type_index = {k: set(v) for k, v in indexes_data.get("type_index", {}).items()}
                     self.attribute_index = {
                         k: {attr: set(vals) for attr, vals in v.items()}
                         for k, v in indexes_data.get("attribute_index", {}).items()
                     }
-                    
-                logger.info("Knowledge graph loaded from disk")
-                
+
+                logger.info("Knowledge graph loaded from disk (JSON)")
+
             except Exception as e:
                 logger.warning(f"Failed to load knowledge graph: {e}")
+
+        elif os.path.exists(legacy_graph_file):
+            logger.warning("Legacy pickle format detected. Please run migration to JSON format.")
+            logger.warning("For security, pickle format is no longer supported.")
                 
     def _save_knowledge_graph(self):
-        """Save knowledge graph to disk"""
-        graph_file = os.path.join(self.memory_path, "knowledge_graph.pkl")
+        """Save knowledge graph to disk (secure JSON format)"""
+        graph_file = os.path.join(self.memory_path, "knowledge_graph.json")
         entities_file = os.path.join(self.memory_path, "entities.json")
         indexes_file = os.path.join(self.memory_path, "kg_indexes.json")
-        
+
         try:
-            with open(graph_file, 'wb') as f:
-                pickle.dump(self.graph, f)
-                
-            with open(entities_file, 'w') as f:
-                json.dump(self.entities, f, indent=2, default=str)
-                
-            with open(indexes_file, 'w') as f:
+            # Use atomic write (write to temp file, then rename)
+            graph_temp = graph_file + ".tmp"
+            entities_temp = entities_file + ".tmp"
+            indexes_temp = indexes_file + ".tmp"
+
+            # Save graph structure as JSON
+            with open(graph_temp, 'w', encoding='utf-8') as f:
+                graph_data = json_graph.node_link_data(self.graph)
+                json.dump(graph_data, f, indent=2, default=str)
+
+            # Save entities
+            with open(entities_temp, 'w', encoding='utf-8') as f:
+                json.dump(self.entities, f, indent=2, default=str, ensure_ascii=False)
+
+            # Save indexes
+            with open(indexes_temp, 'w', encoding='utf-8') as f:
                 indexes_data = {
                     "type_index": {k: list(v) for k, v in self.type_index.items()},
                     "attribute_index": {
@@ -92,12 +109,24 @@ class KnowledgeGraph:
                         for k, v in self.attribute_index.items()
                     }
                 }
-                json.dump(indexes_data, f, indent=2)
-                
-            logger.debug("Knowledge graph saved to disk")
-            
+                json.dump(indexes_data, f, indent=2, ensure_ascii=False)
+
+            # Atomic rename
+            os.replace(graph_temp, graph_file)
+            os.replace(entities_temp, entities_file)
+            os.replace(indexes_temp, indexes_file)
+
+            logger.debug("Knowledge graph saved to disk (JSON)")
+
         except Exception as e:
             logger.warning(f"Failed to save knowledge graph: {e}")
+            # Clean up temp files
+            for temp_file in [graph_temp, entities_temp, indexes_temp]:
+                if os.path.exists(temp_file):
+                    try:
+                        os.remove(temp_file)
+                    except:
+                        pass
             
     def add_entity(self, entity_data: Dict[str, Any]) -> str:
         """Add a new entity to the knowledge graph"""
@@ -107,7 +136,7 @@ class KnowledgeGraph:
             self._remove_least_important_entity()
             
         # Generate entity ID if not provided
-        entity_id = entity_data.get("id") or f"entity_{datetime.now().timestamp()}"
+        entity_id = entity_data.get("id") or f"entity_{datetime.now(timezone.utc).timestamp()}"
         
         # Create entity
         entity = {
@@ -117,8 +146,8 @@ class KnowledgeGraph:
             "attributes": entity_data.get("attributes", {}),
             "description": entity_data.get("description", ""),
             "importance": entity_data.get("importance", 0.5),
-            "created_at": datetime.now(),
-            "last_accessed": datetime.now(),
+            "created_at": datetime.now(timezone.utc),
+            "last_accessed": datetime.now(timezone.utc),
             "access_count": 0,
             "confidence": entity_data.get("confidence", 1.0)
         }
@@ -132,9 +161,9 @@ class KnowledgeGraph:
         # Update indexes
         self._update_entity_indexes(entity_id, entity)
         
-        self.last_updated = datetime.now()
+        self.last_updated = datetime.now(timezone.utc)
         self._save_knowledge_graph()
-        
+
         logger.info(f"Added entity: {entity_id}")
         return entity_id
         
@@ -153,7 +182,7 @@ class KnowledgeGraph:
             raise ValueError("Source or target entity does not exist")
             
         # Generate relation ID
-        relation_id = f"rel_{datetime.now().timestamp()}"
+        relation_id = f"rel_{datetime.now(timezone.utc).timestamp()}"
         
         # Create relation
         relation = {
@@ -164,7 +193,7 @@ class KnowledgeGraph:
             "attributes": relation_data.get("attributes", {}),
             "importance": relation_data.get("importance", 0.5),
             "confidence": relation_data.get("confidence", 1.0),
-            "created_at": datetime.now(),
+            "created_at": datetime.now(timezone.utc),
             "bidirectional": relation_data.get("bidirectional", False)
         }
         
@@ -191,9 +220,9 @@ class KnowledgeGraph:
                 **reverse_relation
             )
             
-        self.last_updated = datetime.now()
+        self.last_updated = datetime.now(timezone.utc)
         self._save_knowledge_graph()
-        
+
         logger.info(f"Added relation: {relation_id}")
         return relation_id
         
@@ -246,7 +275,7 @@ class KnowledgeGraph:
         
         if entity_id in self.entities:
             entity = self.entities[entity_id]
-            entity["last_accessed"] = datetime.now()
+            entity["last_accessed"] = datetime.now(timezone.utc)
             entity["access_count"] += 1
             return entity.copy()
             
@@ -440,10 +469,10 @@ class KnowledgeGraph:
             self.graph.remove_node(entity_id)
             
         del self.entities[entity_id]
-        
-        self.last_updated = datetime.now()
+
+        self.last_updated = datetime.now(timezone.utc)
         self._save_knowledge_graph()
-        
+
         return True
         
     def remove_relation(self, relation_id: str) -> bool:
@@ -465,10 +494,10 @@ class KnowledgeGraph:
             
         # Remove from storage
         del self.relations[relation_id]
-        
-        self.last_updated = datetime.now()
+
+        self.last_updated = datetime.now(timezone.utc)
         self._save_knowledge_graph()
-        
+
         return True
         
     def cleanup(self) -> None:

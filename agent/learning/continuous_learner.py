@@ -3,10 +3,9 @@ Continuous learning system for adaptive behavior improvement
 """
 
 import os
-import pickle
 import numpy as np
 from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from loguru import logger
 import json
 from collections import deque, defaultdict
@@ -34,7 +33,7 @@ class ContinuousLearner:
         
         # Learning statistics
         self.learning_episodes = 0
-        self.last_optimization = datetime.now()
+        self.last_optimization = datetime.now(timezone.utc)
         self.adaptation_count = 0
         
         # Load existing learning data
@@ -47,33 +46,48 @@ class ContinuousLearner:
         os.makedirs(self.memory_path, exist_ok=True)
         
     def _load_learning_data(self):
-        """Load existing learning data from disk"""
-        learning_file = os.path.join(self.memory_path, "learning_data.pkl")
-        
+        """Load existing learning data from disk (secure JSON format)"""
+        learning_file = os.path.join(self.memory_path, "learning_data.json")
+        legacy_file = os.path.join(self.memory_path, "learning_data.pkl")
+
         if os.path.exists(learning_file):
             try:
-                with open(learning_file, 'rb') as f:
-                    data = pickle.load(f)
-                    
+                with open(learning_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
                 self.interaction_history = deque(data.get("interaction_history", []), maxlen=1000)
                 self.feedback_history = deque(data.get("feedback_history", []), maxlen=500)
                 self.performance_metrics = defaultdict(list, data.get("performance_metrics", {}))
                 self.response_patterns = defaultdict(list, data.get("response_patterns", {}))
-                self.context_weights = dict(data.get("context_weights", {}))
-                self.success_patterns = dict(data.get("success_patterns", {}))
+                self.context_weights = defaultdict(float, data.get("context_weights", {}))
+                self.success_patterns = defaultdict(float, data.get("success_patterns", {}))
                 self.learning_episodes = data.get("learning_episodes", 0)
-                self.last_optimization = data.get("last_optimization", datetime.now())
                 self.adaptation_count = data.get("adaptation_count", 0)
-                
-                logger.info("Learning data loaded from disk")
-                
+
+                # Parse timestamp
+                last_opt_str = data.get("last_optimization")
+                if last_opt_str:
+                    try:
+                        self.last_optimization = datetime.fromisoformat(last_opt_str)
+                    except (ValueError, TypeError):
+                        self.last_optimization = datetime.now(timezone.utc)
+                else:
+                    self.last_optimization = datetime.now(timezone.utc)
+
+                logger.info("Learning data loaded from disk (JSON)")
+
             except Exception as e:
                 logger.warning(f"Failed to load learning data: {e}")
+
+        elif os.path.exists(legacy_file):
+            logger.warning("Legacy pickle format detected. Please migrate to JSON format.")
+            logger.warning("For security, pickle format is no longer supported.")
                 
     def _save_learning_data(self):
-        """Save learning data to disk"""
-        learning_file = os.path.join(self.memory_path, "learning_data.pkl")
-        
+        """Save learning data to disk (secure JSON format)"""
+        learning_file = os.path.join(self.memory_path, "learning_data.json")
+        temp_file = learning_file + ".tmp"
+
         try:
             data = {
                 "interaction_history": list(self.interaction_history),
@@ -83,23 +97,32 @@ class ContinuousLearner:
                 "context_weights": dict(self.context_weights),
                 "success_patterns": dict(self.success_patterns),
                 "learning_episodes": self.learning_episodes,
-                "last_optimization": self.last_optimization,
+                "last_optimization": self.last_optimization.isoformat() if isinstance(self.last_optimization, datetime) else str(self.last_optimization),
                 "adaptation_count": self.adaptation_count
             }
-            
-            with open(learning_file, 'wb') as f:
-                pickle.dump(data, f)
-                
-            logger.debug("Learning data saved to disk")
-            
+
+            # Atomic write
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, default=str, ensure_ascii=False)
+
+            os.replace(temp_file, learning_file)
+
+            logger.debug("Learning data saved to disk (JSON)")
+
         except Exception as e:
             logger.warning(f"Failed to save learning data: {e}")
+            # Clean up temp file
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except:
+                    pass
             
     def learn_from_interaction(self, interaction: Dict[str, Any]) -> None:
         """Learn from a new interaction"""
         
         # Add to interaction history
-        interaction["timestamp"] = datetime.now().isoformat()
+        interaction["timestamp"] = datetime.now(timezone.utc).isoformat()
         self.interaction_history.append(interaction)
         
         # Extract learning signals
@@ -195,7 +218,7 @@ class ContinuousLearner:
         # Update adaptation strategies
         self._update_adaptation_strategies()
         
-        self.last_optimization = datetime.now()
+        self.last_optimization = datetime.now(timezone.utc)
         self.adaptation_count += 1
         
     def _analyze_success_patterns(self) -> None:
@@ -320,9 +343,9 @@ class ContinuousLearner:
         
     def process_feedback(self, feedback: Dict[str, Any]) -> Dict[str, Any]:
         """Process feedback for learning"""
-        
+
         processed_feedback = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "feedback_type": feedback.get("type", "rating"),
             "rating": feedback.get("rating", 0.5),
             "comment": feedback.get("comment", ""),
@@ -453,8 +476,8 @@ class ContinuousLearner:
         
     def get_statistics(self) -> Dict[str, Any]:
         """Get learning statistics"""
-        
-        current_time = datetime.now()
+
+        current_time = datetime.now(timezone.utc)
         uptime = current_time - self.last_optimization
         
         return {
@@ -480,9 +503,9 @@ class ContinuousLearner:
         
     def export_learning_data(self, filepath: str) -> None:
         """Export learning data to file"""
-        
+
         export_data = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "config": self.config.dict(),
             "interaction_history": list(self.interaction_history),
             "feedback_history": list(self.feedback_history),
@@ -511,7 +534,7 @@ class ContinuousLearner:
         self.success_patterns.clear()
         
         self.learning_episodes = 0
-        self.last_optimization = datetime.now()
+        self.last_optimization = datetime.now(timezone.utc)
         self.adaptation_count = 0
         
         self._save_learning_data()
